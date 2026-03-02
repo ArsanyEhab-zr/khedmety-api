@@ -4,7 +4,15 @@ const multer = require('multer');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
-app.use(cors());
+// السماح لأي موقع (بما فيهم localhost بتاعك) يكلم السيرفر بحرية
+app.use(cors({
+    origin: '*', 
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
+}));
+
+// الرد على أسئلة المتصفح الأمنية قبل رفع الملفات (Preflight)
+app.options('*', cors());
 // 🌟 السطر ده مهم جداً عشان السيرفر يفهم الداتا اللي جاية من زرار التلخيص
 app.use(express.json());
 
