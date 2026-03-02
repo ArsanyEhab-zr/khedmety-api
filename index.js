@@ -5,7 +5,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization'] }));
+app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization', 'Accept'] }));
 app.options('*', cors());
 
 app.post('/api/parse-pdf', async (req, res) => {
@@ -19,8 +19,8 @@ app.post('/api/parse-pdf', async (req, res) => {
 
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         
-        // 🌟 الاسم ده هو المفتاح السحري لنسخة v1beta
-        const model = genAI.getGenerativeModel({ model: "models/gemini-1.5-flash" });
+        // 🌟 التغيير الجذري هنا: هنستخدم "gemini-1.5-flash-latest" ده أضمن اسم موديل حالياً
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
 
         const pdfPart = {
             inlineData: {
@@ -42,16 +42,21 @@ app.post('/api/parse-pdf', async (req, res) => {
         
         res.json({ success: true, lessons: JSON.parse(responseText) });
     } catch (error) {
-        res.status(500).json({ success: false, error: "فشل الذكاء الاصطناعي", details: error.message });
+        console.error("Error details:", error);
+        res.status(500).json({ 
+            success: false, 
+            error: "فشل الذكاء الاصطناعي", 
+            details: error.message 
+        });
     }
 });
 
-// مسار التلخيص برضه اتأكد إنه متعدل
 app.post('/api/summarize-lesson', async (req, res) => {
     try {
         const { title, goal } = req.body;
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: "models/gemini-1.5-flash" });
+        // 🌟 نغيره هنا كمان للأمان
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
         const prompt = `أنت خادم مدارس أحد. لخص درس "${title}" وهدفه "${goal}" في نقاط تشمل: الفكرة الرئيسية، تطبيق عملي، وآية الدرس.`;
         const result = await model.generateContent(prompt);
         res.json({ success: true, summary: result.response.text() });
