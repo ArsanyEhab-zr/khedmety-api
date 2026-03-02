@@ -3,9 +3,18 @@ const cors = require('cors');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
+
+// إعدادات استقبال البيانات الكبيرة
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-app.use(cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization', 'Accept'] }));
+
+// إعدادات CORS
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.options('*', cors());
 
 app.post('/api/parse-pdf', async (req, res) => {
@@ -19,8 +28,8 @@ app.post('/api/parse-pdf', async (req, res) => {
 
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         
-        // 🌟 التغيير الجذري هنا: هنستخدم "gemini-1.5-flash-latest" ده أضمن اسم موديل حالياً
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+        // 🌟 الموديل ده هو الوحيد اللي بيفهم PDF وشغال طلقة حالياً
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
         const pdfPart = {
             inlineData: {
@@ -29,20 +38,23 @@ app.post('/api/parse-pdf', async (req, res) => {
             }
         };
 
-        const prompt = `أنت مساعد ذكي. استخرج جدول دروس مدارس الأحد من ملف PDF هذا ورجعه بصيغة JSON Array فقط.
-        ممنوع أي نصوص خارج المصفوفة.
-        كل كائن يجب أن يحتوي على:
-        - date: تاريخ الدرس أو اسم الشهر
-        - title: عنوان الدرس
-        - goal: الهدف والآية
-        - page: رقم الصفحة`;
+        const prompt = `أنت مساعد ذكي لخادم مدارس أحد. اقرأ ملف الـ PDF المرفق واستخرج منه جدول الدروس.
+        رجع النتيجة بصيغة JSON Array فقط.
+        مطلوب لكل درس:
+        - date: تاريخ الدرس (مثلا 5 مارس أو 12 مارس)
+        - title: اسم الدرس
+        - goal: هدف الدرس أو الآية الرئيسية
+        - page: رقم الصفحة الموجود فيها الدرس في الـ PDF
+        ممنوع أي نصوص أو شرح خارج الـ JSON.`;
 
         const result = await model.generateContent([prompt, pdfPart]);
         const responseText = result.response.text().replace(/```json/g, "").replace(/```/g, "").trim();
         
-        res.json({ success: true, lessons: JSON.parse(responseText) });
+        const lessons = JSON.parse(responseText);
+        res.json({ success: true, lessons: lessons });
+
     } catch (error) {
-        console.error("Error details:", error);
+        console.error("Error:", error);
         res.status(500).json({ 
             success: false, 
             error: "فشل الذكاء الاصطناعي", 
@@ -55,9 +67,8 @@ app.post('/api/summarize-lesson', async (req, res) => {
     try {
         const { title, goal } = req.body;
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        // 🌟 نغيره هنا كمان للأمان
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
-        const prompt = `أنت خادم مدارس أحد. لخص درس "${title}" وهدفه "${goal}" في نقاط تشمل: الفكرة الرئيسية، تطبيق عملي، وآية الدرس.`;
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const prompt = `أنت خادم مدارس أحد خبير. لخص درس بعنوان "${title}" وهدفه هو "${goal}" في نقاط تشمل: الفكرة الرئيسية بأسلوب شيق، تطبيق عملي للأطفال، وآية الدرس.`;
         const result = await model.generateContent(prompt);
         res.json({ success: true, summary: result.response.text() });
     } catch (error) {
