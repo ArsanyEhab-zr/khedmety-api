@@ -1,12 +1,20 @@
 const express = require('express');
-const cors = require('cors');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const pdfParse = require('pdf-parse');
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-app.use(cors({ origin: '*' }));
-app.options('*', cors());
+
+// 🌟 ميدان الـ CORS المدرع (علشان المتصفح ميبكيش)
+app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+    next();
+});
 
 app.post('/api/parse-pdf', async (req, res) => {
     try {
@@ -16,43 +24,38 @@ app.post('/api/parse-pdf', async (req, res) => {
         const fileResponse = await fetch(pdfUrl);
         const buffer = Buffer.from(await fileResponse.arrayBuffer());
 
-        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        // الموديل الرسمي للـ PDFs
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const pdfData = await pdfParse(buffer);
+        const extractedText = pdfData.text.substring(0, 20000); // قللنا الحروف للسرعة
 
-        const pdfPart = {
-            inlineData: { data: buffer.toString("base64"), mimeType: "application/pdf" }
-        };
+        const prompt = `أنت مساعد ذكي. اقرأ النص واستخرج جدول الدروس كمصفوفة JSON فقط.
+        مطلوب لكل درس: "date", "title", "goal", "page".
+        النص: ${extractedText}`;
 
-        const prompt = `أنت مساعد ذكي لخادم مدارس أحد. استخرج جدول الدروس ورجعه كمصفوفة JSON فقط.
-        لا تكتب أي نص قبل أو بعد المصفوفة.
-        كل درس يجب أن يحتوي على:
-        "date": تاريخ الدرس أو الشهر
-        "title": اسم الدرس
-        "goal": هدف الدرس
-        "page": رقم الصفحة`;
+        const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                model: "llama3-70b-8192",
+                messages: [{ role: "user", content: prompt }],
+                temperature: 0.1
+            })
+        });
 
-        const result = await model.generateContent([prompt, pdfPart]);
-        const responseText = result.response.text().replace(/```json/g, "").replace(/```/g, "").trim();
+        const data = await groqRes.json();
+        let responseText = data.choices[0].message.content;
         
-        res.json({ success: true, lessons: JSON.parse(responseText) });
+        const jsonStart = responseText.indexOf('[');
+        const jsonEnd = responseText.lastIndexOf(']') + 1;
+        const cleanJson = responseText.slice(jsonStart, jsonEnd);
 
+        res.json({ success: true, lessons: JSON.parse(cleanJson) });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, error: "فشل", details: error.message });
-    }
-});
-
-app.post('/api/summarize-lesson', async (req, res) => {
-    try {
-        const { title, goal } = req.body;
-        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-        const prompt = `لخص درس مدارس أحد بعنوان "${title}" وهدفه "${goal}" في نقاط: الفكرة الرئيسية، تطبيق عملي، وآية الدرس.`;
-        const result = await model.generateContent(prompt);
-        res.json({ success: true, summary: result.response.text() });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
+        // حتى لو فشل هيبعتلك إيرور سليم مش CORS
+        res.status(500).json({ success: false, error: "فشل السيرفر", details: error.message });
     }
 });
 
