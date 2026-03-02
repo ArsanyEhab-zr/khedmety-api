@@ -4,11 +4,10 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
 
-// إعدادات استقبال البيانات الكبيرة
+// إعدادات استقبال البيانات الكبيرة (مظبوطة عندك وزي الفل)
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// إعدادات CORS
 app.use(cors({
     origin: '*',
     methods: ['GET', 'POST', 'OPTIONS'],
@@ -17,18 +16,22 @@ app.use(cors({
 
 app.options('*', cors());
 
+// ==========================================
+// 1. مسار تقسيم الـ PDF (النسخة المدرعة)
+// ==========================================
 app.post('/api/parse-pdf', async (req, res) => {
     try {
         const { pdfUrl } = req.body;
         if (!pdfUrl) return res.status(400).json({ error: "مفيش رابط ملف وصل!" });
 
+        console.log("جاري تحميل المذكرة من السحابة...");
         const fileResponse = await fetch(pdfUrl);
         const arrayBuffer = await fileResponse.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
 
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         
-        // 🌟 الموديل ده هو الوحيد اللي بيفهم PDF وشغال طلقة حالياً
+        // 🌟 ده الموديل الوحيد الثابت اللي بيقرأ PDFs حالياً
         const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
         const pdfPart = {
@@ -38,31 +41,51 @@ app.post('/api/parse-pdf', async (req, res) => {
             }
         };
 
+        // 🌟 برومبت صارم جداً عشان ميستهبلش
         const prompt = `أنت مساعد ذكي لخادم مدارس أحد. اقرأ ملف الـ PDF المرفق واستخرج منه جدول الدروس.
-        رجع النتيجة بصيغة JSON Array فقط.
-        مطلوب لكل درس:
-        - date: تاريخ الدرس (مثلا 5 مارس أو 12 مارس)
-        - title: اسم الدرس
-        - goal: هدف الدرس أو الآية الرئيسية
-        - page: رقم الصفحة الموجود فيها الدرس في الـ PDF
-        ممنوع أي نصوص أو شرح خارج الـ JSON.`;
+        يجب أن ترجع النتيجة بصيغة مصفوفة JSON فقط (JSON Array).
+        لا تكتب أي نص قبل أو بعد المصفوفة نهائياً.
+        كل درس يجب أن يحتوي على هذه المفاتيح فقط:
+        "date": تاريخ الدرس (مثلا 5 مارس أو شهر مارس)
+        "title": اسم الدرس
+        "goal": هدف الدرس أو الآية الرئيسية
+        "page": رقم الصفحة`;
 
+        console.log("جاري قراءة المذكرة بالذكاء الاصطناعي...");
         const result = await model.generateContent([prompt, pdfPart]);
-        const responseText = result.response.text().replace(/```json/g, "").replace(/```/g, "").trim();
+        let responseText = result.response.text();
         
-        const lessons = JSON.parse(responseText);
+        // تنظيف وحشي لأي كلام زيادة
+        responseText = responseText.replace(/```json/g, "").replace(/```/g, "").trim();
+        
+        let lessons;
+        try {
+            lessons = JSON.parse(responseText);
+        } catch (jsonError) {
+            // لو جيميني اتفلسف ومبعتش JSON صح، هنمسكه هنا بدل ما السيرفر يقع
+            console.error("جيميني مبعتش JSON سليم:", responseText);
+            return res.status(500).json({
+                success: false,
+                error: "الذكاء الاصطناعي أرسل بيانات غير مفهومة",
+                details: responseText
+            });
+        }
+
         res.json({ success: true, lessons: lessons });
 
     } catch (error) {
-        console.error("Error:", error);
+        console.error("خطأ عام:", error);
         res.status(500).json({ 
             success: false, 
-            error: "فشل الذكاء الاصطناعي", 
+            error: "فشل الاتصال بالذكاء الاصطناعي", 
             details: error.message 
         });
     }
 });
 
+// ==========================================
+// 2. مسار التلخيص (شغال طلقة)
+// ==========================================
 app.post('/api/summarize-lesson', async (req, res) => {
     try {
         const { title, goal } = req.body;
